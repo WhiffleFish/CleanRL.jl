@@ -19,9 +19,9 @@ Base.@kwdef struct DQNConfig
   epsilon_duration::Float64 = 10_000
 end
 
-function make_nn(env::AbstractEnv)
-  in_size = length(state_space(env))
-  out_size = length(action_space(env))
+function make_nn(env)
+  in_size = state_dim(env)
+  out_size = action_count(env)
   Chain(Dense(in_size, 120, relu), Dense(120, 84, relu), Dense(84, out_size))
 end
 
@@ -31,20 +31,23 @@ function linear_schedule(start_ϵ, end_ϵ, duration, t)
 end
 
 
-function dqn(config::DQNConfig=DQNConfig())
-  Logger.make_logger("dqn|$(config.run_name)")
+function dqn(mdp::POMDPs.MDP, config::DQNConfig=DQNConfig(); kwargs...)
+  dqn(MDPEnv(mdp; kwargs...), config)
+end
 
-  env = CartPoleEnv()  # TODO make env configurable through CLI
+function dqn(env::MDPEnv, config::DQNConfig=DQNConfig())
+  Logger.make_logger("dqn|$(config.run_name)")
 
   q_net = make_nn(env)
   target_net = deepcopy(q_net)
   opt = Adam(config.lr)
+  opt_state = Flux.setup(opt, q_net)
 
   transition = (
-    state=rand(state_space(env)),
-    action=rand(action_space(env)),
+    state=rand(Float32, state_dim(env)),
+    action=[rand(1:action_count(env))],
     reward=1.0,
-    next_state=rand(state_space(env)),
+    next_state=rand(Float32, state_dim(env)),
     terminal=true
   )
   rb = Buffer.ReplayBuffer(transition, config.buffer_size)
@@ -61,26 +64,26 @@ function dqn(config::DQNConfig=DQNConfig())
     # action selection
     ϵ = ϵ_schedule(global_step)
     action = if rand() < ϵ
-      env |> action_space |> rand
+      rand(1:action_count(env))
     else
       qs = q_net(obs)
       argmax(qs)
     end
 
-    env(action)  # step env
+    step!(env, action)
 
     # add to buffer
     transition = (
       state=obs,
       action=[action],
-      reward=[reward(env)],
+      reward=[current_reward(env)],
       next_state=deepcopy(state(env)),
       terminal=[is_terminated(env)]
     )
     Buffer.add!(rb, transition)
 
     # Recording episode statistics
-    episode_return += reward(env)
+    episode_return += current_reward(env)
     episode_length += 1
     if is_terminated(env)
       steps_per_sec = trunc(global_step / (time() - start_time))
@@ -100,13 +103,12 @@ function dqn(config::DQNConfig=DQNConfig())
       td_target = vec(data.reward) + config.gamma * next_q .* (1.0 .- vec(data.terminal))
 
       # Get grads and update model
-      params = Flux.params(q_net)
-      loss, gs = Flux.withgradient(params) do
-        q = q_net(data.state)
+      loss, gs = Flux.withgradient(q_net) do net
+        q = net(data.state)
         q = q[actions]
         Flux.mse(td_target, q)
       end
-      Flux.Optimise.update!(opt, params, gs)
+      Flux.update!(opt_state, q_net, gs[1])
 
       if global_step % config.target_net_freq == 0
         target_net = deepcopy(q_net)
@@ -119,3 +121,6 @@ function dqn(config::DQNConfig=DQNConfig())
   end
 end
 
+function dqn(config::DQNConfig=DQNConfig())
+  throw(ArgumentError("dqn now requires a POMDPs.MDP or MDPEnv, for example dqn(mdp, config)."))
+end

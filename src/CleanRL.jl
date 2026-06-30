@@ -1,10 +1,12 @@
 module CleanRL
 
+export DQNConfig, A2CConfig, DDPGConfig, PPOConfig, dqn, a2c, ddpg, ppo
+
 using Base: Threads
 using Dates: now, format
 using Random: shuffle, Xoshiro
 
-using ReinforcementLearning
+using POMDPs
 
 using Flux
 using Flux: Zygote
@@ -17,6 +19,7 @@ using Dates: now, format
 include("utils/replay_buffer.jl")
 include("utils/config_parser.jl")
 include("utils/logger.jl")
+include("utils/pomdp_env.jl")
 include("utils/networks.jl")
 include("utils/multi_thread_env.jl")
 

@@ -27,17 +27,21 @@ end
 #  test harder envs
 #  mulitple V train steps
 #  normalise advantage
-function a2c(config::A2CConfig=A2CConfig())
+function a2c(mdp::POMDPs.MDP, config::A2CConfig=A2CConfig(); kwargs...)
+  a2c(MDPEnv(mdp; kwargs...), config)
+end
+
+function a2c(env::MDPEnv, config::A2CConfig=A2CConfig())
   Logger.make_logger("a2c|$(config.run_name)")
 
-  env = CartPoleEnv(max_steps=500)  # TODO make env configurable through argparse
-
-  actor, critic = Networks.make_actor_critic(env)
-  opt = Flux.Optimiser(ClipNorm(0.5), Adam(config.lr))
+  actor, critic = Networks.make_actor_critic(action_count(env), state_dim(env))
+  opt = Flux.OptimiserChain(ClipNorm(0.5), Adam(config.lr))
+  actor_opt_state = Flux.setup(opt, actor)
+  critic_opt_state = Flux.setup(opt, critic)
 
   transition = (
-    state=rand(state_space(env)),
-    action=rand(action_space(env)),
+    state=rand(Float32, state_dim(env)),
+    action=[rand(1:action_count(env))],
     reward=1.0,
     terminal=true
   )
@@ -55,12 +59,12 @@ function a2c(config::A2CConfig=A2CConfig())
     ac_dist = Categorical(probs)
     action = rand(ac_dist)
 
-    env(action)  # step env
+    step!(env, action)
 
     transition = (
       state=obs,
       action=[action],
-      reward=[reward(env)],
+      reward=[current_reward(env)],
       terminal=[is_terminated(env)]
     )
     Buffer.add!(rb, transition)
@@ -74,27 +78,24 @@ function a2c(config::A2CConfig=A2CConfig())
         data = map(x -> x[:, 1:rb.size], rb.data) # todo -1 or not here?
         final_value = critic(state(env))[1]
         discounted_rewards = discounted_future_rewards(vec(data.reward), vec(data.terminal), final_value, config.gamma)
+        advantage = discounted_rewards - vec(critic(data.state))
 
         # critic update
-        advantage = []
-        critic_params = Flux.params(critic)
-        critic_loss, critic_gs = Flux.withgradient(critic_params) do
-          values = critic(data.state)
-          advantage = discounted_rewards - vec(values)
-          mean(advantage .^ 2)
+        critic_loss, critic_gs = Flux.withgradient(critic) do model
+          values = model(data.state)
+          mean((discounted_rewards - vec(values)) .^ 2)
         end
-        Flux.Optimise.update!(opt, critic_params, critic_gs)
+        Flux.update!(critic_opt_state, critic, critic_gs[1])
 
         # actor update
-        actor_params = Flux.params(actor)
-        actor_loss, actor_gs = Flux.withgradient(actor_params) do
-          ac_probs = data.state |> actor |> softmax
+        actor_loss, actor_gs = Flux.withgradient(actor) do model
+          ac_probs = data.state |> model |> softmax
           ac_dists = Categorical.(eachcol(ac_probs), check_args=false)
           # todo: grad of logpdf is slow, manually do logsoftmax.
           log_probs = logpdf.(ac_dists, vec(data.action))
           -mean(log_probs .* advantage)
         end
-        Flux.Optimise.update!(opt, actor_params, actor_gs)
+        Flux.update!(actor_opt_state, actor, actor_gs[1])
 
         # logging
         @info "Training Statistics" actor_loss critic_loss
@@ -112,3 +113,6 @@ function a2c(config::A2CConfig=A2CConfig())
   end
 end
 
+function a2c(config::A2CConfig=A2CConfig())
+  throw(ArgumentError("a2c now requires a POMDPs.MDP or MDPEnv, for example a2c(mdp, config)."))
+end

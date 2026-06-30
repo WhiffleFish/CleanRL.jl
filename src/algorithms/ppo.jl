@@ -31,7 +31,7 @@ function get_action(obs::AbstractVecOrMat{Float32}, actor::Chain)
   action, logprob_action
 end
 
-function logprob_actions(obs::AbstractVecOrMat{Float32}, actor::Chain, actions::AbstractVector{Int32})
+function logprob_actions(obs::AbstractVecOrMat{Float32}, actor::Chain, actions::AbstractVector{<:Integer})
   logits = actor(obs)
   probs = softmax(logits)
   logprobs = logsoftmax(logits)
@@ -39,7 +39,7 @@ function logprob_actions(obs::AbstractVecOrMat{Float32}, actor::Chain, actions::
   batch_size = last(size(obs))  # batch is last dim
   action_ind = CartesianIndex.(actions, 1:batch_size)  # for 2D indexing
   logprob_action = logprobs[action_ind]
-  entropy = -sum.(probs .* logprobs)
+  entropy = vec(-sum(probs .* logprobs; dims=1))
 
   logprob_action, entropy
 end
@@ -72,29 +72,32 @@ function gae(values::AbstractVector{T}, rewards::AbstractVector{T}, terminals::A
   advantages
 end
 
-function ppo(config::PPOConfig=PPOConfig())
+function ppo(mdp::POMDPs.MDP, config::PPOConfig=PPOConfig(); rng_seed::Integer=0, kwargs...)
+  env_i = Ref(0)
+  ppo(config) do
+    env_i[] += 1
+    MDPEnv(mdp; rng=Xoshiro(hash((rng_seed, env_i[]))), kwargs...)
+  end
+end
+
+function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
   nt = config.num_envs
   Logger.make_logger("ppo-2-test"; to_terminal=false)
 
-  # TODO make env configurable through CLI
-  env = MultiThreadEnv(nt) do
-    seed = hash(Threads.threadid())
-    CartPoleEnv(T=Float32, max_steps=500, rng=Xoshiro(seed))
-  end
+  env = MultiThreadEnv(env_factory, nt)
 
-  single_obs_space = single_state_space(env)
-  single_act_space = single_action_space(env)
-  actor, critic = Networks.make_actor_critic(single_act_space, single_obs_space) .|> Flux.f32
+  actor, critic = Networks.make_actor_critic(single_action_count(env), single_state_dim(env)) .|> Flux.f32
 
   batch_size = config.num_steps * nt
   minibatch_size = batch_size ÷ config.num_minibatches
   num_updates = config.total_timesteps ÷ batch_size
 
-  opt = Flux.Optimiser(ClipNorm(0.5), Adam(config.lr))  # one opt per network?
+  opt = Flux.OptimiserChain(ClipNorm(0.5), Adam(config.lr))  # one opt per network?
+  opt_state = Flux.setup(opt, (actor, critic))
 
   transition = (
-    state=Float32.(rand(state_space(env))),
-    action=Int32.(rand(action_space(env))),
+    state=rand(Float32, single_state_dim(env), nt),
+    action=rand(1:single_action_count(env), nt),
     logprob=Float32.(ones(nt)),
     reward=Float32.(ones(nt)),
     terminal=fill(true, nt),
@@ -109,7 +112,7 @@ function ppo(config::PPOConfig=PPOConfig())
   episode_lengths = zeros(nt)
 
   start_time = time()
-  reset!(env)
+  reset!(env; is_force=true)
 
   next_obs = state(env)
   next_done = is_terminated(env)
@@ -117,7 +120,7 @@ function ppo(config::PPOConfig=PPOConfig())
   for update in 1:num_updates
     if config.anneal_lr
       frac = 1.0 - (update - 1.0) / num_updates
-      opt.os[2].eta = frac * config.lr
+      Flux.Optimisers.adjust!(opt_state, Float32(frac * config.lr))
     end
 
     for step in 1:config.num_steps
@@ -127,9 +130,9 @@ function ppo(config::PPOConfig=PPOConfig())
       action, log_prob = get_action(next_obs, actor)
       value = critic(next_obs)
 
-      env(action) # step env
+      step!(env, action)
 
-      rewards = reward(env)
+      rewards = current_reward(env)
       Buffer.add!(rb, (
         state=next_obs,
         action=action,
@@ -193,13 +196,12 @@ function ppo(config::PPOConfig=PPOConfig())
     for epoch in 1:config.update_epochs
       b_inds = shuffle(b_inds)
 
-      params = Flux.params(actor, critic)
       for start in 1:minibatch_size:batch_size
         pg_loss = 0.0
         v_loss = 0.0
         entropy_loss = 0.0
 
-        loss, gs = Flux.withgradient(params) do
+        loss, gs = Flux.withgradient((actor, critic)) do (actor_model, critic_model)
           end_ind = start + minibatch_size - 1
           mb_inds = b_inds[start:end_ind]
 
@@ -210,8 +212,8 @@ function ppo(config::PPOConfig=PPOConfig())
           mb_values = @view values[mb_inds]
           mb_returns = @view returns[mb_inds]
 
-          newlogprob, entropy = logprob_actions(mb_states, actor, mb_actions)
-          newvalue = critic(mb_states)
+          newlogprob, entropy = logprob_actions(mb_states, actor_model, mb_actions)
+          newvalue = critic_model(mb_states)
           newlogprob = vec(newlogprob)
           newvalue = vec(newvalue)
 
@@ -219,6 +221,8 @@ function ppo(config::PPOConfig=PPOConfig())
           mb_advantages = if config.normalize_advantages
             # todo: revisit fused vector ops in julia perf tips
             (mb_advantages .- mean(mb_advantages)) ./ (std(mb_advantages) .+ 1e-8)
+          else
+            mb_advantages
           end
 
           logratio = newlogprob - mb_logprobs
@@ -229,7 +233,7 @@ function ppo(config::PPOConfig=PPOConfig())
 
           # value loss
           v_loss = if config.clip_value_loss
-            v_loss_unclipped = mean(newvalue .- mb_returns .^ 2)
+            v_loss_unclipped = (newvalue .- mb_returns) .^ 2
             # todo: revisit fused vector ops in julia perf tips
             v_clipped = @. mb_values + clamp(newvalue - mb_values, -config.clip_coef, config.clip_coef)
             v_loss_clipped = @. (v_clipped - mb_returns)^2
@@ -247,9 +251,12 @@ function ppo(config::PPOConfig=PPOConfig())
         @info "Training Statistics" loss pg_loss v_loss entropy_loss log_step_increment = log_step_inc
         last_log_step = deepcopy(global_step)
 
-        Flux.Optimise.update!(opt, params, gs)
+        Flux.update!(opt_state, (actor, critic), gs[1])
       end
     end
   end
 end
 
+function ppo(config::PPOConfig=PPOConfig())
+  throw(ArgumentError("ppo now requires a POMDPs.MDP or env factory, for example ppo(mdp, config) or ppo(() -> MDPEnv(mdp), config)."))
+end
