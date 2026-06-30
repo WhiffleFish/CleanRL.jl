@@ -111,6 +111,7 @@ function a2c(env::MDPEnv, config::A2CConfig=A2CConfig())
     end
 
   end
+  actor, critic
 end
 
 function a2c(config::A2CConfig=A2CConfig())

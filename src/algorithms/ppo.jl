@@ -253,6 +253,7 @@ function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
       end
     end
   end
+  actor, critic
 end
 
 function ppo(config::PPOConfig=PPOConfig())

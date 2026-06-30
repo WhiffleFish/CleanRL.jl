@@ -119,6 +119,7 @@ function dqn(env::MDPEnv, config::DQNConfig=DQNConfig())
       end
     end
   end
+  q_net
 end
 
 function dqn(config::DQNConfig=DQNConfig())

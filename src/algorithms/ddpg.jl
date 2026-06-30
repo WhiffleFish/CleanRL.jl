@@ -133,6 +133,7 @@ function ddpg(env::MDPEnv, config::DDPGConfig=DDPGConfig())
       end
     end
   end
+  actor, critic
 end
 
 function ddpg(config::DDPGConfig=DDPGConfig())
