@@ -21,7 +21,7 @@ _as_float_vector(x::Number) = Float32[x]
 
 function MDPEnv(
   mdp::POMDPs.MDP;
-  rng=Xoshiro(rand(UInt)),
+  rng=Random.default_rng(),
   max_steps::Union{Nothing,Int}=nothing,
   actions=collect(POMDPs.actions(mdp)),
   state_encoder=s -> POMDPs.convert_s(Vector{Float32}, s, mdp),

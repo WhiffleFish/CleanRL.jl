@@ -72,11 +72,9 @@ function gae(values::AbstractVector{T}, rewards::AbstractVector{T}, terminals::A
   advantages
 end
 
-function ppo(mdp::POMDPs.MDP, config::PPOConfig=PPOConfig(); rng_seed::Integer=0, kwargs...)
-  env_i = Ref(0)
+function ppo(mdp::POMDPs.MDP, config::PPOConfig=PPOConfig(); kwargs...)
   ppo(config) do
-    env_i[] += 1
-    MDPEnv(mdp; rng=Xoshiro(hash((rng_seed, env_i[]))), kwargs...)
+    MDPEnv(mdp; kwargs...)
   end
 end
 

@@ -2,19 +2,16 @@ module CleanRL
 
 export DQNConfig, A2CConfig, DDPGConfig, PPOConfig, dqn, a2c, ddpg, ppo
 
-using Base: Threads
 using Dates: now, format
-using Random: shuffle, Xoshiro
+import Random
+using Random: shuffle
 
 using POMDPs
 
 using Flux
 using Flux: Zygote
 using StatsBase: sample, Weights, loglikelihood, mean, entropy, std
-using Random: shuffle
 using Distributions: Categorical, logpdf
-
-using Dates: now, format
 
 include("utils/replay_buffer.jl")
 include("utils/config_parser.jl")
