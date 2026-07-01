@@ -16,6 +16,8 @@
   normalize_advantages::Bool = true
   clip_value_loss::Bool = true
   anneal_lr::Bool = true
+
+  name::String = "ppo-test"
 end
 
 function get_action(obs::AbstractVecOrMat{Float32}, actor::Chain)
@@ -80,7 +82,7 @@ end
 
 function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
   nt = config.num_envs
-  Logger.make_logger("ppo-2-test"; to_terminal=false)
+  Logger.make_logger(config.name; to_terminal=false)
 
   env = MultiThreadEnv(env_factory, nt)
 
