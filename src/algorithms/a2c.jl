@@ -1,5 +1,6 @@
 Base.@kwdef struct A2CConfig
   run_name::String = format(now(), "yy-mm-dd|HH:MM:SS")
+  log_dir::String = "logs"
 
   lr::Float64 = 0.0001
 
@@ -32,7 +33,7 @@ function a2c(mdp::POMDPs.MDP, config::A2CConfig=A2CConfig(); kwargs...)
 end
 
 function a2c(env::MDPEnv, config::A2CConfig=A2CConfig())
-  Logger.make_logger("a2c|$(config.run_name)")
+  Logger.make_logger("a2c|$(config.run_name)"; log_dir=config.log_dir)
 
   actor, critic = Networks.make_actor_critic(action_count(env), state_dim(env))
   opt = Flux.OptimiserChain(ClipNorm(0.5), Adam(config.lr))

@@ -1,5 +1,6 @@
 Base.@kwdef struct DQNConfig
   run_name::String = format(now(), "yy-mm-dd|HH:MM:SS")
+  log_dir::String = "logs"
 
   log_frequencey::Int = 1000
 
@@ -36,7 +37,7 @@ function dqn(mdp::POMDPs.MDP, config::DQNConfig=DQNConfig(); kwargs...)
 end
 
 function dqn(env::MDPEnv, config::DQNConfig=DQNConfig())
-  Logger.make_logger("dqn|$(config.run_name)")
+  Logger.make_logger("dqn|$(config.run_name)"; log_dir=config.log_dir)
 
   q_net = make_nn(env)
   target_net = deepcopy(q_net)

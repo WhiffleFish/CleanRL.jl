@@ -1,5 +1,6 @@
 Base.@kwdef struct DDPGConfig
   run_name::String = format(now(), "yy-mm-dd|HH:MM:SS")
+  log_dir::String = "logs"
 
   total_timesteps::Int = 5_000_000
   buffer_size::Int64 = 1e5
@@ -49,7 +50,7 @@ function ddpg(mdp::POMDPs.MDP, config::DDPGConfig=DDPGConfig(); kwargs...)
 end
 
 function ddpg(env::MDPEnv, config::DDPGConfig=DDPGConfig())
-  Logger.make_logger("ddpg|$(config.run_name)")
+  Logger.make_logger("ddpg|$(config.run_name)"; log_dir=config.log_dir)
 
   actor, critic = make_ddpg_nn(env, config.exploration_noise)
   target_actor = deepcopy(actor)

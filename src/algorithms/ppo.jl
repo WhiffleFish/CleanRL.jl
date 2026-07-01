@@ -18,6 +18,7 @@
   anneal_lr::Bool = true
 
   name::String = "ppo-test"
+  log_dir::String = "logs"
 end
 
 function get_action(obs::AbstractVecOrMat{Float32}, actor::Chain)
@@ -82,7 +83,7 @@ end
 
 function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
   nt = config.num_envs
-  Logger.make_logger(config.name; to_terminal=false)
+  Logger.make_logger(config.name; log_dir=config.log_dir, to_terminal=false)
 
   env = MultiThreadEnv(env_factory, nt)
 
