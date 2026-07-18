@@ -49,6 +49,41 @@ end
   @test is_terminated(env) == Bool[0, 0]
 end
 
+@testset "GAE" begin
+  # γ=λ=0.5 and integer values/rewards keep every intermediate value an exact
+  # binary fraction, so the expected advantages can be checked with `==`.
+  γ = 0.5f0
+  λ = 0.5f0
+
+  @testset "no terminals" begin
+    values = Float32[1, 1, 1, 1]      # [0, k], k=3
+    rewards = Float32[2, 2, 2]        # [1, k]
+    terminals = falses(4)             # [0, k]
+
+    advantages = CleanRL.gae(values, rewards, terminals, γ, λ)
+
+    @test length(advantages) == length(rewards)
+    @test all(isfinite, advantages)
+    # regression check for the bug where the loop skipped t == length(rewards),
+    # leaving advantages[end] as whatever garbage `similar` handed back
+    @test advantages[end] == 1.5f0
+    @test advantages == Float32[1.96875, 1.875, 1.5]
+  end
+
+  @testset "terminal cuts bootstrap" begin
+    values = Float32[1, 1, 1, 1]
+    rewards = Float32[2, 2, 2]
+    terminals = Bool[0, 0, 1, 0]       # episode ends after step 2
+
+    advantages = CleanRL.gae(values, rewards, terminals, γ, λ)
+
+    @test length(advantages) == length(rewards)
+    @test all(isfinite, advantages)
+    @test advantages[end] == 1.5f0
+    @test advantages == Float32[1.75, 1.0, 1.5]
+  end
+end
+
 @testset "Algorithm smoke" begin
   mdp = make_mdp()
 

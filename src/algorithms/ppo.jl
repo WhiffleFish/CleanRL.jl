@@ -65,11 +65,11 @@ function gae(values::AbstractVector{T}, rewards::AbstractVector{T}, terminals::A
   advantages = similar(rewards)
   nonterm = 1.0 .- terminals
 
-  gae = 0.0
-  for t in length(rewards)-1:-1:1
+  lastgaelam = zero(T)
+  for t in length(rewards):-1:1
     δ = rewards[t] + γ * nonterm[t+1] * values[t+1] - values[t]
-    gae = δ + γ * λ * nonterm[t+1] * gae
-    advantages[t] = gae
+    lastgaelam = δ + γ * λ * nonterm[t+1] * lastgaelam
+    advantages[t] = lastgaelam
   end
 
   advantages
@@ -166,6 +166,7 @@ function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
         end
 
         reset!(env)
+        next_obs = deepcopy(state(env))
       end
     end
 
@@ -226,7 +227,10 @@ function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
             mb_advantages
           end
 
-          logratio = newlogprob - mb_logprobs
+          raw_logratio = newlogprob - mb_logprobs
+          n_clipped = count(x -> abs(x) > 20f0, raw_logratio)
+          n_clipped > 0 && @warn "logratio clipped" n_clipped max_abs_logratio = maximum(abs.(raw_logratio))
+          logratio = clamp.(raw_logratio, -20f0, 20f0)
           ratio = exp.(logratio)
           pg_loss1 = @. -mb_advantages * ratio
           pg_loss2 = @. -mb_advantages * clamp.(ratio, 1 - config.clip_coef, 1 + config.clip_coef)
