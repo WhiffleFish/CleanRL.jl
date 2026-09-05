@@ -1,6 +1,6 @@
 export MultiThreadEnv
 
-using Base.Threads: @spawn
+using Base.Threads: @threads
 
 """
     MultiThreadEnv(f, n::Int)
@@ -35,11 +35,9 @@ end
 
 function step!(env::MultiThreadEnv, actions)
   N = ndims(actions)
-  @sync for i in 1:length(env)
-    @spawn begin
-      action = N == 1 ? actions[i] : selectdim(actions, N, i)
-      step!(env[i], action)
-    end
+  @threads for i in 1:length(env)
+    action = N == 1 ? actions[i] : selectdim(actions, N, i)
+    step!(env[i], action)
   end
   env
 end
@@ -49,9 +47,9 @@ function (env::MultiThreadEnv)(actions)
 end
 
 function reset!(env::MultiThreadEnv; is_force=false)
-  @sync for i in 1:length(env)
+  @threads for i in 1:length(env)
     if is_force || is_terminated(env[i])
-      @spawn reset!(env[i])
+      reset!(env[i])
     end
   end
   env
@@ -59,8 +57,8 @@ end
 
 function state(env::MultiThreadEnv)
   N = ndims(env.states)
-  @sync for i in 1:length(env)
-    @spawn selectdim(env.states, N, i) .= state(env[i])
+  @threads for i in 1:length(env)
+    selectdim(env.states, N, i) .= state(env[i])
   end
   env.states
 end
