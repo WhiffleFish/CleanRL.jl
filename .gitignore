@@ -3,3 +3,6 @@ logs/*
 
 Manifest.toml
 test/logs/
+
+scratch/
+venv/

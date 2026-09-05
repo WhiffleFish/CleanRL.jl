@@ -16,8 +16,11 @@ using Distributions: Categorical, logpdf
 include("utils/replay_buffer.jl")
 include("utils/config_parser.jl")
 include("utils/logger.jl")
+include("utils/action_spaces.jl")
 include("utils/pomdp_env.jl")
 include("utils/networks.jl")
+include("utils/normalization.jl")
+include("utils/continuous_policies.jl")
 include("utils/multi_thread_env.jl")
 
 include("algorithms/dqn.jl")

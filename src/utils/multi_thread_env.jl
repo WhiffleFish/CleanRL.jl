@@ -12,6 +12,7 @@ struct MultiThreadEnv{E,S,R}
   states::S
   rewards::R
   terminals::BitVector
+  truncations::BitVector
 end
 
 function MultiThreadEnv(f, n::Int)
@@ -19,10 +20,15 @@ function MultiThreadEnv(f, n::Int)
 end
 
 function MultiThreadEnv(envs::Vector{<:MDPEnv})
+  isempty(envs) && throw(ArgumentError("MultiThreadEnv requires at least one environment"))
+  all(state_dim(e) == state_dim(first(envs)) for e in envs) ||
+    throw(ArgumentError("all environments must have the same observation size"))
+  all(action_space(e) == action_space(first(envs)) for e in envs) ||
+    throw(ArgumentError("all environments must have the same action specification"))
   s_batch = reduce(hcat, state.(envs))
   r_batch = current_reward.(envs)
   t_batch = BitVector(is_terminated.(envs))
-  MultiThreadEnv(envs, s_batch, r_batch, t_batch)
+  MultiThreadEnv(envs, s_batch, r_batch, t_batch, falses(length(envs)))
 end
 
 Base.getindex(env::MultiThreadEnv, i) = env.envs[i]
@@ -72,3 +78,16 @@ function is_terminated(env::MultiThreadEnv)
   env.terminals .= is_terminated.(env.envs)
   env.terminals
 end
+
+
+function is_true_terminated(env::MultiThreadEnv)
+  env.terminals .= is_true_terminated.(env.envs)
+  env.terminals
+end
+
+function is_truncated(env::MultiThreadEnv)
+  env.truncations .= is_truncated.(env.envs)
+  env.truncations
+end
+
+action_space(env::MultiThreadEnv) = single_action_space(env)

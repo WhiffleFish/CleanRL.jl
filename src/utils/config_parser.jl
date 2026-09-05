@@ -28,13 +28,28 @@ function argparse_struct(s)
     push!(args, "--$(string(attrib_name))")
     attrib_value = getfield(s, attrib_name)
     attrib_type = fieldtype(StructType, attrib_name)
-    push!(args, Dict(:default => attrib_value, :arg_type => attrib_type))
+    if attrib_type === Symbol
+      push!(args, Dict(:default => string(attrib_value), :arg_type => String))
+    elseif Nothing <: attrib_type
+      default = attrib_value === nothing ? "nothing" : string(attrib_value)
+      push!(args, Dict(:default => default, :arg_type => String))
+    else
+      push!(args, Dict(:default => attrib_value, :arg_type => attrib_type))
+    end
   end
 
   add_arg_table(settings, args...)
   args = parse_args(settings)
   # converting string keys to symbols for dict_to_struct
   args = Dict(Symbol(k) => v for (k, v) in args)
+  for name in propertynames(s)
+    field_type = fieldtype(StructType, name)
+    if field_type === Symbol
+      args[name] = Symbol(args[name])
+    elseif Nothing <: field_type
+      args[name] = args[name] == "nothing" ? nothing : parse(Float32, args[name])
+    end
+  end
 
   _dict_to_struct(args, StructType)
 end
