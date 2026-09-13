@@ -1,7 +1,7 @@
 export MDPEnv, state, step!, reset!, is_terminated, is_true_terminated,
   is_truncated, current_reward, action_count, action_dim, state_dim,
   random_action, action_space, single_action_space, single_state_dim,
-  single_action_count
+  single_action_count, single_action_dim
 
 mutable struct MDPEnv{M,RNG,S,AS,SE,AD,RS}
   mdp::M
@@ -104,6 +104,15 @@ end
 
 function single_action_count(env)
   action_count(first(env.envs))
+end
+
+"""Width of one environment's action vector, for a Box space.
+
+Alongside `single_state_dim` and `single_action_count` so that an algorithm can size its
+buffers from the vectorized env alone, without reaching into `env.envs` -- which a vectorized
+env that is not a collection of `MDPEnv`s need not have."""
+function single_action_dim(env)
+  action_dim(first(env.envs))
 end
 
 single_action_space(env) = action_space(first(env.envs))

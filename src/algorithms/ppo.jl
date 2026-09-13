@@ -147,11 +147,39 @@ function _make_ppo_env(env_factory, index::Int, seed::Int)
   end
 end
 
-function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
+"""
+    ppo(env_factory, config)
+
+Build `config.num_envs` environments with `env_factory` and train on them. The factory is
+called as `f(index, rng)`, `f(rng)` or `f()`, whichever it accepts, with a per-environment
+`MersenneTwister(config.seed + index)`.
+"""
+ppo(env_factory::Function, config::PPOConfig=PPOConfig()) =
+  (_validate_ppo(config);
+   ppo(MultiThreadEnv([_make_ppo_env(env_factory, i, config.seed) for i in 1:config.num_envs]),
+       config))
+
+"""
+    ppo(env, config)
+
+Train on an already-constructed vectorized environment.
+
+`env` needs `length`, `single_state_dim`, `single_action_space`, `single_action_dim` (Box
+spaces only), `state`, `step!`, `reset!(env; is_force)`, `current_reward`,
+`is_true_terminated` and `is_truncated` -- it does NOT have to be a `MultiThreadEnv` or hold
+`MDPEnv`s. That is the entry point for an environment whose vectorization is the point: one
+that evaluates a network over all `num_envs` states in a single batched forward pass, rather
+than once per environment.
+
+`config.seed` still seeds the actor initialization and the update loop, but a prebuilt env
+carries its own RNG and this method does not reseed it -- seeding it is the caller's job.
+"""
+function ppo(env, config::PPOConfig)
   _validate_ppo(config)
+  length(env) == config.num_envs ||
+    throw(ArgumentError("env has $(length(env)) environments but config.num_envs = $(config.num_envs)"))
   rng = Random.MersenneTwister(config.seed)
   init_rng = Random.MersenneTwister(config.seed)
-  env = MultiThreadEnv([_make_ppo_env(env_factory, i, config.seed) for i in 1:config.num_envs])
   spec = single_action_space(env)
   config.use_sde && spec isa DiscreteActionSpec && throw(ArgumentError("use_sde=true requires a BoxActionSpec"))
   spec isa BoxActionSpec && config.action_transform === :tanh && config.ent_coeff != 0f0 &&
@@ -178,7 +206,7 @@ function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
   opt_state = Flux.setup(opt, (actor, critic))
   n, tmax = config.num_envs, config.num_steps
   observations = zeros(Float32, obs_dim, n, tmax)
-  actions = spec isa BoxActionSpec ? zeros(Float32, action_dim(first(env)), n, tmax) : zeros(Int, n, tmax)
+  actions = spec isa BoxActionSpec ? zeros(Float32, single_action_dim(env), n, tmax) : zeros(Int, n, tmax)
   logprobs = zeros(Float32, n, tmax)
   rewards = zeros(Float32, n, tmax)
   values = zeros(Float32, n, tmax)
@@ -261,7 +289,7 @@ function ppo(env_factory::Function, config::PPOConfig=PPOConfig())
       config.gamma, config.gae_lambda)
     returns = advantages .+ values
     states_flat = reshape(observations, obs_dim, batch_size)
-    actions_flat = spec isa BoxActionSpec ? reshape(actions, action_dim(first(env)), batch_size) : vec(actions)
+    actions_flat = spec isa BoxActionSpec ? reshape(actions, single_action_dim(env), batch_size) : vec(actions)
     logprobs_flat, values_flat = vec(logprobs), vec(values)
     advantages_flat, returns_flat = vec(advantages), vec(returns)
     b_inds = collect(1:batch_size)
