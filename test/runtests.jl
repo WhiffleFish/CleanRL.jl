@@ -207,3 +207,27 @@ end
     anneal_lr=true,
   ); max_steps=1))
 end
+
+@testset "PPO warm start" begin
+  mdp = make_mdp()
+  factory = () -> MDPEnv(mdp; max_steps=1)
+  config = PPOConfig(total_timesteps=8, num_steps=2, num_envs=2, num_minibatches=1,
+    update_epochs=1, lr=1f-12, name="test-ppo-warm-start")
+  na = length(collect(POMDPs.actions(mdp)))
+  init_actor, init_critic = CleanRL.Networks.make_actor_critic(na, 2;
+    rng=Random.MersenneTwister(123))
+  actor_before = deepcopy(init_actor)
+
+  actor, critic = ppo(factory, config; initial_actor=init_actor, initial_critic=init_critic)
+  obs = Float32[0.3, -0.2]
+  @test actor !== init_actor
+  @test init_actor(obs) == actor_before(obs)
+  @test isapprox(actor(obs), init_actor(obs); atol=1f-6)
+  @test isapprox(critic(obs), init_critic(obs); atol=1f-6)
+
+  @test_throws ArgumentError ppo(factory, config; initial_actor=init_actor)
+  @test_throws ArgumentError ppo(factory,
+    PPOConfig(; total_timesteps=8, num_steps=2, num_envs=2, num_minibatches=1,
+      update_epochs=1, normalize_observations=true);
+    initial_actor=init_actor, initial_critic=init_critic)
+end

@@ -152,12 +152,12 @@ end
 
 Build `config.num_envs` environments with `env_factory` and train on them. The factory is
 called as `f(index, rng)`, `f(rng)` or `f()`, whichever it accepts, with a per-environment
-`MersenneTwister(config.seed + index)`.
+`MersenneTwister(config.seed + index)`. Keyword arguments are forwarded to `ppo(env, config)`.
 """
-ppo(env_factory::Function, config::PPOConfig=PPOConfig()) =
+ppo(env_factory::Function, config::PPOConfig=PPOConfig(); kwargs...) =
   (_validate_ppo(config);
    ppo(MultiThreadEnv([_make_ppo_env(env_factory, i, config.seed) for i in 1:config.num_envs]),
-       config))
+       config; kwargs...))
 
 """
     ppo(env, config)
@@ -173,11 +173,20 @@ than once per environment.
 
 `config.seed` still seeds the actor initialization and the update loop, but a prebuilt env
 carries its own RNG and this method does not reseed it -- seeding it is the caller's job.
+
+`initial_actor` and `initial_critic` warm-start training from copies of existing networks
+(for example, a behavior-cloned policy) instead of a fresh initialization. They must accept
+the raw observations, so they cannot be combined with `normalize_observations`.
 """
-function ppo(env, config::PPOConfig)
+function ppo(env, config::PPOConfig; initial_actor=nothing, initial_critic=nothing)
   _validate_ppo(config)
   length(env) == config.num_envs ||
     throw(ArgumentError("env has $(length(env)) environments but config.num_envs = $(config.num_envs)"))
+  warm_start = initial_actor !== nothing || initial_critic !== nothing
+  warm_start && (initial_actor === nothing || initial_critic === nothing) &&
+    throw(ArgumentError("warm-starting PPO requires both initial_actor and initial_critic"))
+  warm_start && config.normalize_observations &&
+    throw(ArgumentError("initial networks cannot be combined with normalize_observations"))
   rng = Random.MersenneTwister(config.seed)
   init_rng = Random.MersenneTwister(config.seed)
   spec = single_action_space(env)
@@ -188,7 +197,9 @@ function ppo(env, config::PPOConfig)
 
   obs_dim = single_state_dim(env)
   obs_rms = config.normalize_observations ? RunningMeanStd(obs_dim) : nothing
-  actor, critic = if spec isa BoxActionSpec
+  actor, critic = if warm_start
+    deepcopy(initial_actor), deepcopy(initial_critic)
+  elseif spec isa BoxActionSpec
     continuous_actor_critic(spec, obs_dim; use_sde=config.use_sde,
       log_std_init=config.log_std_init, full_std=config.full_std,
       action_transform=config.action_transform, obs_normalizer=obs_rms,
